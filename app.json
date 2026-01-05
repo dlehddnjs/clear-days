@@ -1,7 +1,8 @@
 {
   "expo": {
-    "name": "clear-days",
+    "name": "ClearDays",
     "slug": "clear-days",
+    "scheme": "clear-days",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -25,6 +26,10 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-sqlite",
+      "expo-router"
+    ]
   }
 }
