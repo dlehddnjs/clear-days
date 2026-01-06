@@ -1,6 +1,8 @@
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
-import { getNotificationSettings } from './settings';
+import {Platform} from 'react-native';
+
+import {getNotificationSettings} from './settings';
+import {t} from '../i18n';
 
 Notifications.setNotificationHandler({
     handleNotification: async () => ({
@@ -10,24 +12,18 @@ Notifications.setNotificationHandler({
     }),
 });
 
-export async function requestNotificationPermissions(): Promise<boolean> {
+export async function requestPermissionsAsync() {
     if (Platform.OS === 'web') return false;
 
-    const current = await Notifications.getPermissionsAsync();
-    if (current.status === 'granted') return true;
+    const {status: existingStatus} = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
 
-    const next = await Notifications.requestPermissionsAsync();
-    return next.status === 'granted';
-}
-
-export async function initNotifications() {
-    // Android는 채널 설정이 필요한 경우가 많아서 기본 채널을 세팅
-    if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('default', {
-            name: 'default',
-            importance: Notifications.AndroidImportance.DEFAULT,
-        });
+    if (existingStatus !== 'granted') {
+        const {status} = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
     }
+
+    return finalStatus === 'granted';
 }
 
 export async function cancelAllReminders() {
@@ -37,39 +33,41 @@ export async function cancelAllReminders() {
 export async function scheduleCustomReminders() {
     await cancelAllReminders();
 
-    const s = await getNotificationSettings();
-    if (!s.enabled || s.mode === 'none') return;
+    const settings = await getNotificationSettings();
+    if (!settings.enabled) return;
 
-    const hasMorning = s.mode === 'morning' || s.mode === 'both';
-    const hasEvening = s.mode === 'evening' || s.mode === 'both';
+    // ✅ DAILY 타입 명시
+    const dailyTrigger = (hour: number) => ({
+        type: Notifications.SchedulableTriggerInputTypes.DAILY,
+        hour,
+        minute: 0,
+        repeats: true,
+    });
 
-    if (hasMorning) {
+    if (settings.morning) {
         await Notifications.scheduleNotificationAsync({
             content: {
-                title: '아침 체크인',
-                body: '오늘 피부 기록 잊지 마세요.',
-                data: { type: 'daily-reminder', slot: 'morning' },
+                title: t('reminders.title'),
+                body: t('reminders.body'),
             },
-            trigger: {
-                hour: s.morningHour,
-                minute: s.morningMinute,
-                repeats: true,
-            },
+            trigger: dailyTrigger(settings.morningHour),
         });
     }
 
-    if (hasEvening) {
+    if (settings.evening) {
         await Notifications.scheduleNotificationAsync({
             content: {
-                title: '저녁 체크인',
-                body: '오늘 피부/음식 기록하고 마무리해요.',
-                data: { type: 'daily-reminder', slot: 'evening' },
+                title: t('reminders.title'),
+                body: t('reminders.body'),
             },
-            trigger: {
-                hour: s.eveningHour,
-                minute: s.eveningMinute,
-                repeats: true,
-            },
+            trigger: dailyTrigger(settings.eveningHour),
         });
+    }
+}
+
+export async function initNotifications() {
+    const ok = await requestPermissionsAsync();
+    if (ok) {
+        await scheduleCustomReminders();
     }
 }

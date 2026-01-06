@@ -1,199 +1,427 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, Pressable, Alert, Dimensions, ActivityIndicator } from 'react-native';
-import { LineChart, BarChart } from 'react-native-chart-kit';
-import * as Sharing from 'expo-sharing';
-import { captureRef } from 'react-native-view-shot';
+import {useEffect, useMemo, useState} from 'react';
+import {ActivityIndicator, Dimensions, ScrollView, Text, View} from 'react-native';
+import {BarChart, LineChart} from 'react-native-chart-kit';
 
-import { getWeeklyTrend, getFoodLagInsights } from '../../src/db/repo';
+import {getCurrentLocale, t} from '../../src/i18n';
+import {getFoodLagInsights, getWeeklyTrend} from '../../src/db/repo';
+import {SafeAreaView} from "react-native-safe-area-context";
 
 const screenWidth = Dimensions.get('window').width;
 
-const FOOD_LABELS: Record<string, string> = {
-    refined_carbs: '정제탄수',
-    whole_grain: '통곡/저GI',
-    dairy: '유제품',
-    alcohol: '술',
-    fried_fat: '튀김/고지방',
-    spicy: '매운/자극',
-};
-
 export default function ReportScreen() {
-    const reportRef = useRef<View | null>(null);
-
     const [loading, setLoading] = useState(true);
     const [weekly, setWeekly] = useState<Array<{ week: string; avgScore: number; count: number }>>([]);
-    const [triggers, setTriggers] = useState<Record<string, { rateNum: number; rate: string; count: number; badNextDay: number }>>(
-        {}
-    );
+    const [triggers, setTriggers] = useState<Record<string, {
+        rateNum: number;
+        rate: string;
+        count: number;
+        badNextDay: number
+    }>>({});
 
     useEffect(() => {
         (async () => {
             setLoading(true);
             try {
-                const [w, t] = await Promise.all([getWeeklyTrend(28), getFoodLagInsights(14)]);
+                const [w, tgr] = await Promise.all([getWeeklyTrend(28), getFoodLagInsights(14)]);
                 setWeekly(w);
-                setTriggers(t);
+                setTriggers(tgr);
             } finally {
                 setLoading(false);
             }
         })();
     }, []);
 
+    const formatWeekLabel = (weekStr: string): string => {
+        const locale = getCurrentLocale();
+        const match = weekStr.match(/(\d{4})-W(\d{2})/);
+        if (!match) return weekStr;
+
+        const year = parseInt(match[1]);
+        const weekNum = parseInt(match[2]);
+
+        const jan4 = new Date(year, 0, 4);
+        const startOfWeek = new Date(jan4);
+        startOfWeek.setDate(jan4.getDate() - jan4.getDay() + 1 + (weekNum - 1) * 7);
+
+        const month = startOfWeek.getMonth();
+        const weekOfMonth = Math.ceil(startOfWeek.getDate() / 7);
+
+        if (locale === 'ko') {
+            const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+            return `${monthNames[month]} ${weekOfMonth}주`;
+        } else {
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const suffix = weekOfMonth === 1 ? 'st' : weekOfMonth === 2 ? 'nd' : weekOfMonth === 3 ? 'rd' : 'th';
+            return `${monthNames[month]} ${weekOfMonth}${suffix}`;
+        }
+    };
+
     const lineData = useMemo(() => {
-        // weeklyTrend가 week DESC로 오기 때문에 차트는 좌->우가 시간 흐름이 되도록 reverse
         const ordered = [...weekly].reverse();
         return {
-            labels: ordered.map((w) => w.week.replace(/^(\d{4}-W)/, 'W')),
-            datasets: [
-                {
-                    data: ordered.map((w) => Number.isFinite(w.avgScore) ? Number(w.avgScore) : 0),
-                },
-            ],
+            labels: ordered.map((w) => formatWeekLabel(w.week)),
+            datasets: [{data: ordered.map((w) => (Number.isFinite(w.avgScore) ? Number(w.avgScore) : 0))}],
         };
     }, [weekly]);
 
     const topTriggers = useMemo(() => {
         const list = Object.entries(triggers)
-            .map(([k, v]) => ({ key: k, ...v }))
+            .map(([k, v]) => ({key: k, ...v}))
             .sort((a, b) => (b.rateNum ?? 0) - (a.rateNum ?? 0))
             .slice(0, 5);
 
         return {
-            labels: list.map((x) => FOOD_LABELS[x.key] || x.key),
-            values: list.map((x) => Math.round(x.rateNum ?? 0)),
+            labels: list.map((x) => t(`food.${x.key}`)),
+            // ✅ rate 문자열에서 % 제거하고 숫자로 변환
+            values: list.map((x) => {
+                const rateStr = x.rate || '0%';
+                return parseInt(rateStr.replace('%', '')) || 0;
+            }),
             meta: list,
         };
     }, [triggers]);
+
+    const trendAnalysis = useMemo(() => {
+        if (weekly.length < 2) return null;
+        const recent = weekly[0];
+        const previous = weekly[1];
+        const diff = recent.avgScore - previous.avgScore;
+
+        if (diff < -0.3) return {emoji: '🎉', text: t('report.trendGreatImprovement'), color: '#059669'};
+        if (diff < -0.1) return {emoji: '😊', text: t('report.trendImproving'), color: '#10b981'};
+        if (diff > 0.3) return {emoji: '⚠️', text: t('report.trendWorsening'), color: '#dc2626'};
+        if (diff > 0.1) return {emoji: '😕', text: t('report.trendSlightlyWorse'), color: '#f59e0b'};
+        return {emoji: '😌', text: t('report.trendStable'), color: '#6b7280'};
+    }, [weekly]);
+
+    const getSkinScoreInterpretation = (score: number) => {
+        if (score >= 1.7) return {emoji: '😰', text: t('report.scoreVeryBad'), color: '#dc2626'};
+        if (score >= 1.3) return {emoji: '😟', text: t('report.scoreBad'), color: '#ef4444'};
+        if (score >= 0.7) return {emoji: '😐', text: t('report.scoreMedium'), color: '#f59e0b'};
+        if (score >= 0.3) return {emoji: '🙂', text: t('report.scoreGood'), color: '#10b981'};
+        return {emoji: '😊', text: t('report.scoreVeryGood'), color: '#059669'};
+    };
 
     const chartConfig = useMemo(
         () => ({
             backgroundGradientFrom: '#fff',
             backgroundGradientTo: '#fff',
-            decimalPlaces: 0,
-            color: (opacity = 1) => `rgba(17, 24, 39, ${opacity})`,
+            decimalPlaces: 1,
+            color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
             labelColor: (opacity = 1) => `rgba(107, 114, 128, ${opacity})`,
-            propsForDots: { r: '4' },
+            propsForDots: {r: '5', strokeWidth: '2', stroke: '#3b82f6'},
+            propsForBackgroundLines: {
+                strokeDasharray: '',
+                stroke: '#f3f4f6',
+            },
         }),
         []
     );
 
-    const share = async () => {
-        try {
-            const ok = await Sharing.isAvailableAsync();
-            if (!ok) {
-                Alert.alert('공유 불가', '이 기기/환경에서는 공유 기능을 사용할 수 없어요.');
-                return;
-            }
-
-            if (!reportRef.current) {
-                Alert.alert('오류', '리포트 영역을 찾지 못했어요. 잠시 후 다시 시도해주세요.');
-                return;
-            }
-
-            // 캡처 품질/포맷은 필요에 따라 조절
-            const uri = await captureRef(reportRef.current, {
-                format: 'png',
-                quality: 1,
-                result: 'tmpfile',
-            });
-
-            await Sharing.shareAsync(uri, {
-                dialogTitle: '피부 리포트 공유',
-                mimeType: 'image/png',
-                UTI: 'public.png',
-            });
-        } catch (e: any) {
-            Alert.alert('공유 실패', e?.message ? String(e.message) : '공유 중 오류가 발생했어요.');
-        }
-    };
+    const barChartConfig = useMemo(
+        () => ({
+            backgroundGradientFrom: '#fff',
+            backgroundGradientTo: '#fff',
+            decimalPlaces: 0,
+            color: (opacity = 1) => `rgba(239, 68, 68, ${opacity})`,
+            labelColor: (opacity = 1) => `rgba(107, 114, 128, ${opacity})`,
+            propsForBackgroundLines: {
+                strokeDasharray: '',
+                stroke: '#f3f4f6',
+            },
+        }),
+        []
+    );
 
     if (loading) {
         return (
-            <View style={{ flex: 1, padding: 16, alignItems: 'center', justifyContent: 'center' }}>
-                <ActivityIndicator />
-                <Text style={{ marginTop: 8, color: '#666' }}>리포트 생성 중…</Text>
-            </View>
+            <SafeAreaView style={{flex: 1, backgroundColor: '#f9fafb', alignItems: 'center', justifyContent: 'center'}}
+                          edges={['top', 'left', 'right']}>
+                <ActivityIndicator size="large" color="#3b82f6"/>
+                <Text style={{marginTop: 12, color: '#666', fontSize: 15}}>{t('common.loading')}</Text>
+            </SafeAreaView>
         );
     }
 
     const noWeekly = weekly.length === 0;
-    const noTriggers = Object.keys(triggers).length === 0;
+    const noTriggers = topTriggers.labels.length === 0;
+
+    const avgScore = weekly.length > 0
+        ? weekly.reduce((sum, w) => sum + w.avgScore, 0) / weekly.length
+        : 0;
+    const avgInterpretation = getSkinScoreInterpretation(avgScore);
 
     return (
-        <ScrollView style={{ flex: 1, backgroundColor: '#fff' }} contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
-            <View
-                ref={(r) => (reportRef.current = r)}
-                collapsable={false}
-                style={{
-                    backgroundColor: 'white',
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: '#eee',
-                    padding: 12,
-                }}
-            >
-                <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 12 }}>주간 리포트</Text>
+        <SafeAreaView style={{flex: 1, backgroundColor: '#f9fafb'}} edges={['top', 'left', 'right']}>
+            <ScrollView style={{flex: 1}} contentContainerStyle={{padding: 16, paddingBottom: 24}}>
+                {/* 헤더 */}
+                <View style={{marginBottom: 20}}>
+                    <Text style={{fontSize: 26, fontWeight: '800', color: '#111', marginBottom: 4}}>
+                        📊 {t('report.title')}
+                    </Text>
+                    <Text style={{fontSize: 14, color: '#6b7280'}}>
+                        {t('report.description')}
+                    </Text>
+                </View>
 
-                <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 8 }}>최근 4주 피부 점수(평균)</Text>
-                {noWeekly ? (
-                    <Text style={{ color: '#666', marginBottom: 12 }}>데이터가 부족해요(먼저 기록을 쌓아주세요).</Text>
-                ) : (
-                    <LineChart
-                        data={lineData}
-                        width={screenWidth - 16 * 2 - 12 * 2}
-                        height={220}
-                        chartConfig={chartConfig}
-                        bezier
-                        style={{ borderRadius: 12 }}
-                    />
-                )}
-
-                <View style={{ height: 16 }} />
-
-                <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 8 }}>최근 14일 트리거 TOP 5 (다음날 ‘많이’ 비율)</Text>
-                {noTriggers ? (
-                    <Text style={{ color: '#666' }}>트리거를 계산할 데이터가 부족해요(음식 기록 + 다음날 피부 기록이 필요).</Text>
-                ) : (
-                    <>
-                        <BarChart
-                            data={{
-                                labels: topTriggers.labels,
-                                datasets: [{ data: topTriggers.values }],
-                            }}
-                            width={screenWidth - 16 * 2 - 12 * 2}
-                            height={260}
-                            chartConfig={chartConfig}
-                            fromZero
-                            showValuesOnTopOfBars
-                            style={{ borderRadius: 12 }}
-                        />
-
-                        <View style={{ marginTop: 10, gap: 6 }}>
-                            {topTriggers.meta.map((m) => (
-                                <Text key={m.key} style={{ color: '#666' }}>
-                                    - {FOOD_LABELS[m.key] || m.key}: {m.rate} ({m.badNextDay}/{m.count})
+                {/* 트렌드 인사이트 */}
+                {trendAnalysis && (
+                    <View style={{
+                        backgroundColor: 'white',
+                        borderRadius: 16,
+                        padding: 16,
+                        marginBottom: 16,
+                        borderWidth: 2,
+                        borderColor: trendAnalysis.color + '40',
+                    }}>
+                        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                            <Text style={{fontSize: 32, marginRight: 12}}>{trendAnalysis.emoji}</Text>
+                            <View style={{flex: 1}}>
+                                <Text style={{fontSize: 12, color: '#6b7280', fontWeight: '600', marginBottom: 2}}>
+                                    {t('report.thisWeekTrend')}
                                 </Text>
-                            ))}
+                                <Text style={{fontSize: 16, fontWeight: '700', color: trendAnalysis.color}}>
+                                    {trendAnalysis.text}
+                                </Text>
+                            </View>
                         </View>
-                    </>
+                    </View>
                 )}
-            </View>
 
-            <Pressable
-                onPress={share}
-                style={{
-                    marginTop: 12,
-                    padding: 14,
-                    borderRadius: 12,
-                    backgroundColor: '#111',
-                }}
-            >
-                <Text style={{ color: 'white', textAlign: 'center', fontWeight: '700' }}>리포트 이미지 공유</Text>
-            </Pressable>
+                {/* 피부 점수 추이 */}
+                <View style={{
+                    backgroundColor: 'white',
+                    borderRadius: 16,
+                    padding: 16,
+                    marginBottom: 16,
+                    borderWidth: 1,
+                    borderColor: '#e5e7eb',
+                }}>
+                    <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 12}}>
+                        <Text style={{fontSize: 18, fontWeight: '700', color: '#111', flex: 1}}>
+                            {t('report.skinTrend')}
+                        </Text>
+                        <View style={{
+                            backgroundColor: '#eff6ff',
+                            paddingHorizontal: 10,
+                            paddingVertical: 4,
+                            borderRadius: 12,
+                        }}>
+                            <Text style={{fontSize: 11, fontWeight: '700', color: '#3b82f6'}}>
+                                {t('report.recent4weeks')}
+                            </Text>
+                        </View>
+                    </View>
 
-            <Text style={{ marginTop: 10, color: '#666', fontSize: 12 }}>
-                팁: 공유 이미지는 “현재 화면에 보이는 리포트 영역” 기준으로 캡처됩니다.
-            </Text>
-        </ScrollView>
+                    {/* 피부 점수 범례 */}
+                    <View style={{
+                        backgroundColor: '#f9fafb',
+                        borderRadius: 12,
+                        padding: 12,
+                        marginBottom: 12,
+                        borderWidth: 1,
+                        borderColor: '#e5e7eb',
+                    }}>
+                        <Text style={{fontSize: 12, color: '#6b7280', fontWeight: '600', marginBottom: 8}}>
+                            📍 {t('report.scoreGuide')}
+                        </Text>
+                        <View style={{flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8}}>
+                            <View style={{alignItems: 'center', minWidth: 60}}>
+                                <Text style={{fontSize: 20, marginBottom: 2}}>😊</Text>
+                                <Text style={{fontSize: 10, color: '#059669', fontWeight: '600'}}>
+                                    {t('report.scoreClear')}
+                                </Text>
+                            </View>
+                            <View style={{alignItems: 'center', minWidth: 60}}>
+                                <Text style={{fontSize: 20, marginBottom: 2}}>😐</Text>
+                                <Text style={{fontSize: 10, color: '#f59e0b', fontWeight: '600'}}>
+                                    {t('report.scoreSome')}
+                                </Text>
+                            </View>
+                            <View style={{alignItems: 'center', minWidth: 60}}>
+                                <Text style={{fontSize: 20, marginBottom: 2}}>😰</Text>
+                                <Text style={{fontSize: 10, color: '#dc2626', fontWeight: '600'}}>
+                                    {t('report.scoreSevere')}
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+
+                    {noWeekly ? (
+                        <View style={{
+                            alignItems: 'center',
+                            padding: 40,
+                            backgroundColor: '#f9fafb',
+                            borderRadius: 12,
+                            borderWidth: 1,
+                            borderColor: '#e5e7eb',
+                            borderStyle: 'dashed'
+                        }}>
+                            <Text style={{fontSize: 40, marginBottom: 8}}>📈</Text>
+                            <Text style={{color: '#9ca3af', fontSize: 14, textAlign: 'center'}}>
+                                {t('report.notEnough')}
+                            </Text>
+                        </View>
+                    ) : (
+                        <>
+                            <LineChart
+                                data={lineData}
+                                width={screenWidth - 16 * 2 - 16 * 2}
+                                height={200}
+                                chartConfig={chartConfig}
+                                bezier
+                                style={{marginVertical: 8, borderRadius: 12}}
+                                withInnerLines={true}
+                                withOuterLines={true}
+                                withVerticalLines={false}
+                                yAxisInterval={1}
+                                segments={4}
+                            />
+                            <View style={{
+                                flexDirection: 'row',
+                                justifyContent: 'space-around',
+                                marginTop: 8,
+                                paddingTop: 12,
+                                borderTopWidth: 1,
+                                borderTopColor: '#f3f4f6'
+                            }}>
+                                <View style={{alignItems: 'center'}}>
+                                    <Text style={{fontSize: 11, color: '#9ca3af', marginBottom: 4}}>
+                                        {t('report.average')}
+                                    </Text>
+                                    <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
+                                        <Text style={{fontSize: 20}}>{avgInterpretation.emoji}</Text>
+                                        <View>
+                                            <Text style={{fontSize: 16, fontWeight: '700', color: '#111'}}>
+                                                {avgScore.toFixed(1)}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                </View>
+                                <View style={{alignItems: 'center'}}>
+                                    <Text style={{fontSize: 11, color: '#9ca3af', marginBottom: 4}}>
+                                        {t('report.best')}
+                                    </Text>
+                                    <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
+                                        <Text style={{fontSize: 20}}>😊</Text>
+                                        <Text style={{fontSize: 16, fontWeight: '700', color: '#059669'}}>
+                                            {Math.min(...weekly.map(w => w.avgScore)).toFixed(1)}
+                                        </Text>
+                                    </View>
+                                </View>
+                                <View style={{alignItems: 'center'}}>
+                                    <Text style={{fontSize: 11, color: '#9ca3af', marginBottom: 4}}>
+                                        {t('report.worst')}
+                                    </Text>
+                                    <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
+                                        <Text style={{fontSize: 20}}>😰</Text>
+                                        <Text style={{fontSize: 16, fontWeight: '700', color: '#dc2626'}}>
+                                            {Math.max(...weekly.map(w => w.avgScore)).toFixed(1)}
+                                        </Text>
+                                    </View>
+                                </View>
+                            </View>
+                        </>
+                    )}
+                </View>
+
+                {/* 트리거 TOP 5 */}
+                <View style={{
+                    backgroundColor: 'white',
+                    borderRadius: 16,
+                    padding: 16,
+                    marginBottom: 16,
+                    borderWidth: 1,
+                    borderColor: '#e5e7eb',
+                }}>
+                    <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 12}}>
+                        <Text style={{fontSize: 18, fontWeight: '700', color: '#111', flex: 1}}>
+                            {t('report.topTriggers')}
+                        </Text>
+                        <View style={{
+                            backgroundColor: '#fef2f2',
+                            paddingHorizontal: 10,
+                            paddingVertical: 4,
+                            borderRadius: 12,
+                        }}>
+                            <Text style={{fontSize: 11, fontWeight: '700', color: '#ef4444'}}>
+                                {t('report.recent14days')}
+                            </Text>
+                        </View>
+                    </View>
+
+                    {noTriggers ? (
+                        <View style={{
+                            alignItems: 'center',
+                            padding: 40,
+                            backgroundColor: '#f9fafb',
+                            borderRadius: 12,
+                            borderWidth: 1,
+                            borderColor: '#e5e7eb',
+                            borderStyle: 'dashed'
+                        }}>
+                            <Text style={{fontSize: 40, marginBottom: 8}}>🍽️</Text>
+                            <Text style={{color: '#9ca3af', fontSize: 14, textAlign: 'center'}}>
+                                {t('report.notEnough')}
+                            </Text>
+                        </View>
+                    ) : (
+                        <>
+                            <BarChart
+                                data={{labels: topTriggers.labels, datasets: [{data: topTriggers.values}]}}
+                                width={screenWidth - 16 * 2 - 16 * 2}
+                                height={240}
+                                chartConfig={barChartConfig}
+                                fromZero
+                                showValuesOnTopOfBars
+                                style={{marginVertical: 8, borderRadius: 12}}
+                                withInnerLines={false}
+                            />
+
+                            <View style={{
+                                marginTop: 12,
+                                paddingTop: 12,
+                                borderTopWidth: 1,
+                                borderTopColor: '#f3f4f6'
+                            }}>
+                                {topTriggers.meta.map((m, idx) => (
+                                    <View key={m.key} style={{
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        paddingVertical: 8,
+                                        backgroundColor: idx % 2 === 0 ? '#fafafa' : 'transparent',
+                                        paddingHorizontal: 8,
+                                        borderRadius: 6,
+                                    }}>
+                                        <View style={{
+                                            width: 24,
+                                            height: 24,
+                                            borderRadius: 12,
+                                            backgroundColor: '#fef2f2',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            marginRight: 10,
+                                        }}>
+                                            <Text style={{fontSize: 11, fontWeight: '700', color: '#ef4444'}}>
+                                                {idx + 1}
+                                            </Text>
+                                        </View>
+                                        <Text style={{flex: 1, fontSize: 14, fontWeight: '600', color: '#111'}}>
+                                            {t(`food.${m.key}`)}
+                                        </Text>
+                                        <Text style={{fontSize: 13, color: '#6b7280', marginRight: 8}}>
+                                            {m.badNextDay}/{m.count}
+                                        </Text>
+                                        <Text style={{fontSize: 15, fontWeight: '700', color: '#ef4444'}}>
+                                            {m.rate}
+                                        </Text>
+                                    </View>
+                                ))}
+                            </View>
+                        </>
+                    )}
+                </View>
+            </ScrollView>
+        </SafeAreaView>
     );
 }

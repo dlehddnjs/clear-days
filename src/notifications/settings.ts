@@ -1,28 +1,27 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { NotificationSettings } from './types';
 
-const KEY = 'notificationSettings';
+const NOTIF_SETTINGS_KEY = 'notificationSettings';
 
-const DEFAULTS: NotificationSettings = {
+const DEFAULT_SETTINGS: NotificationSettings = {
     enabled: true,
-    mode: 'both',
+    morning: true,
+    evening: true,
     morningHour: 8,
-    morningMinute: 0,
     eveningHour: 21,
-    eveningMinute: 0,
 };
 
 export async function getNotificationSettings(): Promise<NotificationSettings> {
     try {
-        const raw = await AsyncStorage.getItem(KEY);
-        if (!raw) return DEFAULTS;
-        const parsed = JSON.parse(raw);
-        return { ...DEFAULTS, ...parsed };
+        const json = await AsyncStorage.getItem(NOTIF_SETTINGS_KEY);
+        if (!json) return DEFAULT_SETTINGS;
+        const parsed = JSON.parse(json);
+        return { ...DEFAULT_SETTINGS, ...parsed };
     } catch {
-        return DEFAULTS;
+        return DEFAULT_SETTINGS;
     }
 }
 
 export async function saveNotificationSettings(settings: NotificationSettings) {
-    await AsyncStorage.setItem(KEY, JSON.stringify(settings));
+    await AsyncStorage.setItem(NOTIF_SETTINGS_KEY, JSON.stringify(settings));
 }

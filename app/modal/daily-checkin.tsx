@@ -1,6 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, Alert, ScrollView } from 'react-native';
+
+import { t } from '../../src/i18n';
 import {
     getDailyLog,
     upsertDailyLog,
@@ -13,13 +15,13 @@ import {
 import { scheduleCustomReminders } from '../../src/notifications/notif';
 
 const FOOD_CATEGORIES = [
-    { key: 'refined_carbs', label: '정제탄수(빵/면/라면/디저트)' },
-    { key: 'whole_grain', label: '통곡/저GI' },
-    { key: 'dairy', label: '유제품' },
-    { key: 'alcohol', label: '술' },
-    { key: 'fried_fat', label: '튀김/고지방' },
-    { key: 'spicy', label: '매운/자극' },
-];
+    'refined_carbs',
+    'whole_grain',
+    'dairy',
+    'alcohol',
+    'fried_fat',
+    'spicy',
+] as const;
 
 export default function DailyCheckinModal() {
     const router = useRouter();
@@ -63,12 +65,11 @@ export default function DailyCheckinModal() {
     };
 
     const showDbError = (e: unknown) => {
-        const msg = e instanceof DbWriteError ? e.message : '저장 중 오류가 발생했어요.';
+        const msg = e instanceof DbWriteError ? e.message : t('checkin.savedFailStorage');
         Alert.alert(
-            '저장 실패',
-            msg.includes('disk') || msg.includes('full')
-                ? '휴대폰 저장 공간이 부족할 수 있어요. 용량 확보 후 다시 시도해주세요.'
-                : msg
+            t('checkin.savedFailTitle'),
+            msg.includes('disk') || msg.includes('full') ? t('checkin.savedFailStorage') : msg,
+            [{ text: t('common.ok') }]
         );
     };
 
@@ -92,120 +93,201 @@ export default function DailyCheckinModal() {
                 exercise: exercise ? 1 : 0,
             });
 
-            await scheduleCustomReminders(); // 사용자가 설정한 값 기준으로 재스케줄
+            await scheduleCustomReminders();
             router.back();
         } catch (e) {
             showDbError(e);
         }
     };
 
+    const skinButtons = useMemo(
+        () => [
+            { value: 0 as const, label: t('checkin.none') },
+            { value: 1 as const, label: t('checkin.mild') },
+            { value: 2 as const, label: t('checkin.severe') },
+        ],
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [t('common.language')]
+    );
+
+    const sleepButtons = useMemo(
+        () => [
+            { v: null as number | null, label: t('checkin.sleepNone') },
+            { v: 6, label: t('checkin.sleep6') },
+            { v: 7, label: t('checkin.sleep7') },
+            { v: 9, label: t('checkin.sleep9') },
+        ],
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [t('common.language')]
+    );
+
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }}>
-            <Text style={{ fontSize: 18, fontWeight: '600' }}>{dateKey} 기록</Text>
+            <Text style={{ fontSize: 18, fontWeight: '700' }}>
+                {t('checkin.title')} · {dateKey}
+            </Text>
 
-            <Text>오늘 피부(없음/조금/많이)</Text>
+            <Text style={{ fontSize: 14, color: '#666' }}>{t('checkin.skinLabel')}</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-                {[0, 1, 2].map((v) => (
+                {skinButtons.map((b) => (
                     <Pressable
-                        key={v}
-                        onPress={() => setSkinScore(v as 0 | 1 | 2)}
+                        key={b.value}
+                        onPress={() => setSkinScore(b.value)}
                         style={{
-                            padding: 10,
-                            borderWidth: 1,
-                            borderRadius: 8,
-                            borderColor: skinScore === v ? '#111' : '#ccc',
                             flex: 1,
+                            padding: 12,
+                            borderRadius: 10,
+                            borderWidth: 1,
+                            borderColor: skinScore === b.value ? '#111' : '#e5e7eb',
+                            backgroundColor: skinScore === b.value ? '#111' : 'white',
                         }}
                     >
-                        <Text style={{ textAlign: 'center' }}>{v === 0 ? '없음' : v === 1 ? '조금' : '많이'}</Text>
+                        <Text style={{ textAlign: 'center', color: skinScore === b.value ? 'white' : '#111' }}>
+                            {b.label}
+                        </Text>
                     </Pressable>
                 ))}
             </View>
 
             <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Pressable onPress={() => setItch(!itch)} style={{ padding: 10, borderWidth: 1, borderRadius: 8, flex: 1 }}>
-                    <Text style={{ textAlign: 'center' }}>가려움: {itch ? 'ON' : 'OFF'}</Text>
+                <Pressable
+                    onPress={() => setItch((v) => !v)}
+                    style={{
+                        flex: 1,
+                        padding: 12,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: itch ? '#111' : '#e5e7eb',
+                        backgroundColor: itch ? '#111' : 'white',
+                    }}
+                >
+                    <Text style={{ textAlign: 'center', color: itch ? 'white' : '#111' }}>{t('checkin.itch')}</Text>
                 </Pressable>
-                <Pressable onPress={() => setPain(!pain)} style={{ padding: 10, borderWidth: 1, borderRadius: 8, flex: 1 }}>
-                    <Text style={{ textAlign: 'center' }}>통증: {pain ? 'ON' : 'OFF'}</Text>
+
+                <Pressable
+                    onPress={() => setPain((v) => !v)}
+                    style={{
+                        flex: 1,
+                        padding: 12,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: pain ? '#111' : '#e5e7eb',
+                        backgroundColor: pain ? '#111' : 'white',
+                    }}
+                >
+                    <Text style={{ textAlign: 'center', color: pain ? 'white' : '#111' }}>{t('checkin.pain')}</Text>
                 </Pressable>
             </View>
 
-            <Text>음식 카테고리(선택, 여러 개 가능)</Text>
+            <Text style={{ fontSize: 14, color: '#666', marginTop: 8 }}>{t('checkin.foodLabel')}</Text>
             <View style={{ gap: 8 }}>
-                {FOOD_CATEGORIES.map((c) => (
-                    <Pressable
-                        key={c.key}
-                        onPress={() => toggleFood(c.key)}
-                        style={{ padding: 10, borderWidth: 1, borderRadius: 8 }}
-                    >
-                        <Text>{selectedFoods.includes(c.key) ? '[x] ' : '[ ] '}{c.label}</Text>
-                    </Pressable>
-                ))}
+                {FOOD_CATEGORIES.map((key) => {
+                    const active = selectedFoods.includes(key);
+                    return (
+                        <Pressable
+                            key={key}
+                            onPress={() => toggleFood(key)}
+                            style={{
+                                padding: 12,
+                                borderRadius: 10,
+                                borderWidth: 1,
+                                borderColor: active ? '#111' : '#e5e7eb',
+                                backgroundColor: active ? '#111' : 'white',
+                            }}
+                        >
+                            <Text style={{ color: active ? 'white' : '#111' }}>{t(`food.${key}`)}</Text>
+                        </Pressable>
+                    );
+                })}
             </View>
 
-            <Text style={{ marginTop: 8 }}>빠른 습관 체크(선택)</Text>
+            <Text style={{ fontSize: 14, color: '#666', marginTop: 8 }}>{t('checkin.habitsLabel')}</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Pressable onPress={() => setPillowcase(!pillowcase)} style={{ padding: 10, borderWidth: 1, borderRadius: 8, flex: 1 }}>
-                    <Text style={{ textAlign: 'center' }}>베개커버 교체: {pillowcase ? '✅' : '❌'}</Text>
+                <Pressable
+                    onPress={() => setPillowcase((v) => !v)}
+                    style={{
+                        flex: 1,
+                        padding: 12,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: pillowcase ? '#111' : '#e5e7eb',
+                        backgroundColor: pillowcase ? '#111' : 'white',
+                    }}
+                >
+                    <Text style={{ textAlign: 'center', color: pillowcase ? 'white' : '#111' }}>
+                        {t('checkin.pillowcase')}
+                    </Text>
                 </Pressable>
-                <Pressable onPress={() => setExercise(!exercise)} style={{ padding: 10, borderWidth: 1, borderRadius: 8, flex: 1 }}>
-                    <Text style={{ textAlign: 'center' }}>운동: {exercise ? '✅' : '❌'}</Text>
+
+                <Pressable
+                    onPress={() => setExercise((v) => !v)}
+                    style={{
+                        flex: 1,
+                        padding: 12,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: exercise ? '#111' : '#e5e7eb',
+                        backgroundColor: exercise ? '#111' : 'white',
+                    }}
+                >
+                    <Text style={{ textAlign: 'center', color: exercise ? 'white' : '#111' }}>{t('checkin.exercise')}</Text>
                 </Pressable>
             </View>
 
-            <Text>스트레스</Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-                {[0, 1, 2].map((v) => (
-                    <Pressable
-                        key={v}
-                        onPress={() => setStressLevel(v as 0 | 1 | 2)}
-                        style={{
-                            padding: 10,
-                            borderWidth: 1,
-                            borderRadius: 8,
-                            flex: 1,
-                            borderColor: stressLevel === v ? '#111' : '#ccc',
-                        }}
-                    >
-                        <Text style={{ textAlign: 'center' }}>{v === 0 ? '없음' : v === 1 ? '보통' : '높음'}</Text>
-                    </Pressable>
-                ))}
-            </View>
-
-            <Text>수면시간(선택)</Text>
+            <Text style={{ fontSize: 14, color: '#666' }}>{t('checkin.stress')}</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
                 {[
-                    { label: '미기록', val: null },
-                    { label: '6h', val: 6 },
-                    { label: '7h', val: 7 },
-                    { label: '8h', val: 8 },
-                    { label: '9h+', val: 9 },
-                ].map((o) => (
+                    { v: 0 as const, label: t('checkin.stress0') },
+                    { v: 1 as const, label: t('checkin.stress1') },
+                    { v: 2 as const, label: t('checkin.stress2') },
+                ].map((x) => (
                     <Pressable
-                        key={String(o.val)}
-                        onPress={() => setSleepHours(o.val)}
+                        key={x.v}
+                        onPress={() => setStressLevel(x.v)}
                         style={{
-                            padding: 10,
-                            borderWidth: 1,
-                            borderRadius: 8,
-                            borderColor: sleepHours === o.val ? '#111' : '#ccc',
                             flex: 1,
+                            padding: 12,
+                            borderRadius: 10,
+                            borderWidth: 1,
+                            borderColor: stressLevel === x.v ? '#111' : '#e5e7eb',
+                            backgroundColor: stressLevel === x.v ? '#111' : 'white',
                         }}
                     >
-                        <Text style={{ textAlign: 'center' }}>{o.label}</Text>
+                        <Text style={{ textAlign: 'center', color: stressLevel === x.v ? 'white' : '#111' }}>{x.label}</Text>
                     </Pressable>
                 ))}
             </View>
 
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                <Pressable onPress={() => router.back()} style={{ flex: 1, padding: 12, borderWidth: 1, borderRadius: 8 }}>
-                    <Text style={{ textAlign: 'center' }}>닫기</Text>
-                </Pressable>
-                <Pressable onPress={save} style={{ flex: 1, padding: 12, backgroundColor: '#111', borderRadius: 8 }}>
-                    <Text style={{ color: 'white', textAlign: 'center' }}>저장</Text>
-                </Pressable>
+            <Text style={{ fontSize: 14, color: '#666' }}>{t('checkin.sleep')}</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+                {sleepButtons.map((x) => (
+                    <Pressable
+                        key={String(x.v)}
+                        onPress={() => setSleepHours(x.v)}
+                        style={{
+                            flex: 1,
+                            padding: 10,
+                            borderRadius: 10,
+                            borderWidth: 1,
+                            borderColor: sleepHours === x.v ? '#111' : '#e5e7eb',
+                            backgroundColor: sleepHours === x.v ? '#111' : 'white',
+                        }}
+                    >
+                        <Text style={{ textAlign: 'center', color: sleepHours === x.v ? 'white' : '#111' }}>{x.label}</Text>
+                    </Pressable>
+                ))}
             </View>
+
+            <Pressable onPress={save} style={{ marginTop: 12, padding: 14, backgroundColor: '#111', borderRadius: 12 }}>
+                <Text style={{ color: 'white', textAlign: 'center', fontWeight: '700' }}>{t('common.save')}</Text>
+            </Pressable>
+
+            <Pressable
+                onPress={() => router.back()}
+                style={{ padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb' }}
+            >
+                <Text style={{ textAlign: 'center' }}>{t('common.close')}</Text>
+            </Pressable>
         </ScrollView>
     );
 }
