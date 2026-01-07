@@ -33,7 +33,15 @@
       "expo-sqlite",
       "expo-router",
       "expo-localization",
-      "expo-splash-screen"
+      "expo-splash-screen",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "androidGradlePluginVersion": "8.3.0"
+          }
+        }
+      ]
     ]
   }
 }
