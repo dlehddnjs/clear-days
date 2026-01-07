@@ -1,6 +1,7 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useCallback, useMemo, useState} from 'react';
 import {ActivityIndicator, Dimensions, ScrollView, Text, View} from 'react-native';
 import {BarChart, LineChart} from 'react-native-chart-kit';
+import {useFocusEffect} from '@react-navigation/native';
 
 import {getCurrentLocale, t} from '../../src/i18n';
 import {getFoodLagInsights, getWeeklyTrend} from '../../src/db/repo';
@@ -18,18 +19,20 @@ export default function ReportScreen() {
         badNextDay: number
     }>>({});
 
-    useEffect(() => {
-        (async () => {
-            setLoading(true);
-            try {
-                const [w, tgr] = await Promise.all([getWeeklyTrend(28), getFoodLagInsights(14)]);
-                setWeekly(w);
-                setTriggers(tgr);
-            } finally {
-                setLoading(false);
-            }
-        })();
-    }, []);
+    useFocusEffect(
+        useCallback(() => {
+            (async () => {
+                setLoading(true);
+                try {
+                    const [w, tgr] = await Promise.all([getWeeklyTrend(28), getFoodLagInsights(14)]);
+                    setWeekly(w);
+                    setTriggers(tgr);
+                } finally {
+                    setLoading(false);
+                }
+            })();
+        }, [])
+    );
 
     const formatWeekLabel = (weekStr: string): string => {
         const locale = getCurrentLocale();
@@ -72,7 +75,6 @@ export default function ReportScreen() {
 
         return {
             labels: list.map((x) => t(`food.${x.key}`)),
-            // ✅ rate 문자열에서 % 제거하고 숫자로 변환
             values: list.map((x) => {
                 const rateStr = x.rate || '0%';
                 return parseInt(rateStr.replace('%', '')) || 0;
@@ -154,7 +156,6 @@ export default function ReportScreen() {
     return (
         <SafeAreaView style={{flex: 1, backgroundColor: '#f9fafb'}} edges={['top', 'left', 'right']}>
             <ScrollView style={{flex: 1}} contentContainerStyle={{padding: 16, paddingBottom: 24}}>
-                {/* 헤더 */}
                 <View style={{marginBottom: 20}}>
                     <Text style={{fontSize: 26, fontWeight: '800', color: '#111', marginBottom: 4}}>
                         📊 {t('report.title')}
@@ -164,7 +165,6 @@ export default function ReportScreen() {
                     </Text>
                 </View>
 
-                {/* 트렌드 인사이트 */}
                 {trendAnalysis && (
                     <View style={{
                         backgroundColor: 'white',
@@ -188,7 +188,6 @@ export default function ReportScreen() {
                     </View>
                 )}
 
-                {/* 피부 점수 추이 */}
                 <View style={{
                     backgroundColor: 'white',
                     borderRadius: 16,
@@ -213,7 +212,6 @@ export default function ReportScreen() {
                         </View>
                     </View>
 
-                    {/* 피부 점수 범례 */}
                     <View style={{
                         backgroundColor: '#f9fafb',
                         borderRadius: 12,
@@ -325,7 +323,6 @@ export default function ReportScreen() {
                     )}
                 </View>
 
-                {/* 트리거 TOP 5 */}
                 <View style={{
                     backgroundColor: 'white',
                     borderRadius: 16,
