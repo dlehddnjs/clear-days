@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.cleardays"
+      "bundleIdentifier": "kr.simplefunction.cleardays"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +24,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.cleardays"
+      "package": "kr.simplefunction.cleardays"
     },
     "web": {
       "favicon": "./assets/favicon.png"
