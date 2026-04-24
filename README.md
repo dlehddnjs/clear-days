@@ -118,5 +118,5 @@ Node.js 18+, Expo CLI, Xcode(iOS) 또는 Android Studio(Android) 필요.
 
 | 플랫폼 | 식별자 |
 |--------|--------|
-| iOS | `kr.simplefunction.cleardays` |
+| iOS (미출시) | `kr.simplefunction.cleardays` |
 | Android | `kr.simplefunction.cleardays` |
