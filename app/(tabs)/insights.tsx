@@ -1,9 +1,9 @@
-import {useCallback, useEffect, useMemo, useState} from 'react';
+import {useCallback, useMemo, useState} from 'react';
 import {ActivityIndicator, Pressable, ScrollView, Text, View} from 'react-native';
 import {useFocusEffect} from 'expo-router';
 
 import {t} from '../../src/i18n';
-import {getFoodLagInsights, getHabitCorrelation} from '../../src/db/repo';
+import {getFoodLagInsights, getHabitCorrelation, getInsightAvailability, detectTriggers, getPersonalizedInsights, getEarlyStageInsights} from '../../src/db/repo';
 import {SafeAreaView} from "react-native-safe-area-context";
 
 export default function InsightsScreen() {
@@ -13,34 +13,38 @@ export default function InsightsScreen() {
     const [insights30d, setInsights30d] = useState<any>({});
     const [habitCorrelation7d, setHabitCorrelation7d] = useState<any>(null);
     const [habitCorrelation30d, setHabitCorrelation30d] = useState<any>(null);
+    const [insightAvailability, setInsightAvailability] = useState<any>(null);
+    const [triggers, setTriggers] = useState<any[]>([]);
+    const [personalizedInsights, setPersonalizedInsights] = useState<any[]>([]);
+    const [earlyStageInsights, setEarlyStageInsights] = useState<any[]>([]);
 
     const habitCorrelation = viewPeriod === '7d' ? habitCorrelation7d : habitCorrelation30d;
 
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const [i7, i30, correlation7, correlation30] = await Promise.all([
+            const [i7, i30, correlation7, correlation30, availability, triggerData, personalized, earlyStage] = await Promise.all([
                 getFoodLagInsights(7),
                 getFoodLagInsights(30),
                 getHabitCorrelation(7),
                 getHabitCorrelation(30),
+                getInsightAvailability(),
+                detectTriggers(30),
+                getPersonalizedInsights(),
+                getEarlyStageInsights(),
             ]);
             setInsights7d(i7);
             setInsights30d(i30);
             setHabitCorrelation7d(correlation7);
             setHabitCorrelation30d(correlation30);
+            setInsightAvailability(availability);
+            setTriggers(triggerData);
+            setPersonalizedInsights(personalized);
+            setEarlyStageInsights(earlyStage);
         } finally {
             setLoading(false);
         }
     }, []);
-
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            loadData();
-        }, 200);
-
-        return () => clearTimeout(timer);
-    }, [loadData]);
 
     useFocusEffect(
         useCallback(() => {
@@ -57,7 +61,7 @@ export default function InsightsScreen() {
     }, [insights]);
 
     const topRiskFoods = useMemo(() => {
-        return cards.filter(([, data]) => (data.rateNum ?? 0) >= 0.4).slice(0, 5);
+        return cards.filter(([, data]) => (data.rateNum ?? 0) >= 40).slice(0, 5);
     }, [cards]);
 
     if (loading) {
@@ -119,48 +123,112 @@ export default function InsightsScreen() {
                 </View>
 
                 <ScrollView style={{flex: 1}} contentContainerStyle={{padding: 16, paddingTop: 0}}>
-                    {/* 요약 카드 */}
-                    <View style={{
-                        padding: 20,
-                        backgroundColor: topRiskFoods.length > 0 ? '#fef2f2' : '#f0fdf4',
-                        borderRadius: 12,
-                        marginBottom: 20,
-                        borderLeftWidth: 4,
-                        borderLeftColor: topRiskFoods.length > 0 ? '#ef4444' : '#10b981',
-                    }}>
-                        <Text style={{fontSize: 20, fontWeight: 'bold', marginBottom: 8}}>
-                            🎯 {t('insights.summary')}
-                        </Text>
-                        <Text style={{fontSize: 15, color: '#374151', lineHeight: 22}}>
-                            {topRiskFoods.length > 0
-                                ? t('insights.summaryRisk', {count: topRiskFoods.length})
-                                : t('insights.summaryNoRisk')}
-                        </Text>
-                    </View>
+                    {/* 초기 단계 인사이트 - 7일 미만일 때 표시 */}
+                    {insightAvailability && !insightAvailability.canShowBasicInsights && earlyStageInsights.length > 0 && (
+                        <>
+                            <Text style={{
+                                fontSize: 18,
+                                fontWeight: '700',
+                                marginBottom: 16,
+                                color: '#111',
+                            }}>
+                                {t('insights.earlyStageTitle')}
+                            </Text>
+                            
+                            {earlyStageInsights.map((insight, idx) => {
+                                const bgColor = insight.type === 'welcome' ? '#f0fdf4' : 
+                                               insight.type === 'progress' ? '#eff6ff' : 
+                                               insight.type === 'tip' ? '#fffbeb' : '#f5f3ff';
+                                const borderColor = insight.type === 'welcome' ? '#10b981' : 
+                                                   insight.type === 'progress' ? '#3b82f6' : 
+                                                   insight.type === 'tip' ? '#f59e0b' : '#8b5cf6';
+                                
+                                return (
+                                    <View key={idx} style={{
+                                        padding: 16,
+                                        backgroundColor: bgColor,
+                                        borderRadius: 12,
+                                        marginBottom: 12,
+                                        borderLeftWidth: 4,
+                                        borderLeftColor: borderColor,
+                                    }}>
+                                        <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 8}}>
+                                            <Text style={{fontSize: 24, marginRight: 8}}>{insight.icon}</Text>
+                                            <Text style={{fontSize: 16, fontWeight: '700', color: '#111', flex: 1}}>
+                                                {t(insight.titleKey)}
+                                            </Text>
+                                        </View>
+                                        <Text style={{fontSize: 14, color: '#374151', lineHeight: 20}}>
+                                            {t(insight.descriptionKey, insight.descriptionParams || {})}
+                                        </Text>
+                                    </View>
+                                );
+                            })}
+                            
+                            <View style={{
+                                padding: 16,
+                                backgroundColor: '#f0f9ff',
+                                borderRadius: 12,
+                                marginBottom: 20,
+                                borderLeftWidth: 4,
+                                borderLeftColor: '#0ea5e9',
+                            }}>
+                                <Text style={{fontSize: 15, fontWeight: '700', color: '#0c4a6e', marginBottom: 8}}>
+                                    🎯 {t('insights.comingSoon')}
+                                </Text>
+                                <Text style={{fontSize: 13, color: '#075985', lineHeight: 18}}>
+                                    {t('insights.comingSoonDesc', {days: 7 - insightAvailability.daysCollected})}
+                                </Text>
+                            </View>
+                        </>
+                    )}
 
-                    {/* 음식 트리거 분석 */}
-                    <Text style={{fontSize: 18, fontWeight: '700', marginBottom: 12, color: '#111'}}>
-                        {t('insights.titleFood')}
-                    </Text>
-
-                    {cards.length === 0 ? (
+                    {/* 요약 카드 - 7일 이상일 때만 표시 */}
+                    {insightAvailability?.canShowBasicInsights && (
                         <View style={{
-                            padding: 32,
-                            backgroundColor: '#fff',
+                            padding: 20,
+                            backgroundColor: topRiskFoods.length > 0 ? '#fef2f2' : '#f0fdf4',
                             borderRadius: 12,
-                            alignItems: 'center',
+                            marginBottom: 20,
+                            borderLeftWidth: 4,
+                            borderLeftColor: topRiskFoods.length > 0 ? '#ef4444' : '#10b981',
                         }}>
-                            <Text style={{fontSize: 48, marginBottom: 12}}>📊</Text>
-                            <Text style={{textAlign: 'center', color: '#666', fontSize: 15}}>
-                                {t('insights.noData')}
+                            <Text style={{fontSize: 20, fontWeight: 'bold', marginBottom: 8}}>
+                                🎯 {t('insights.summary')}
+                            </Text>
+                            <Text style={{fontSize: 15, color: '#374151', lineHeight: 22}}>
+                                {topRiskFoods.length > 0
+                                    ? t('insights.summaryRisk', {count: topRiskFoods.length})
+                                    : t('insights.summaryNoRisk')}
                             </Text>
                         </View>
-                    ) : (
-                        cards.map(([cat, data]) => {
+                    )}
+
+                    {/* 음식 트리거 분석 - 7일 이상일 때만 표시 */}
+                    {insightAvailability?.canShowBasicInsights && (
+                        <>
+                            <Text style={{fontSize: 18, fontWeight: '700', marginBottom: 12, color: '#111'}}>
+                                {t('insights.titleFood')}
+                            </Text>
+
+                            {cards.length === 0 ? (
+                                <View style={{
+                                    padding: 32,
+                                    backgroundColor: '#fff',
+                                    borderRadius: 12,
+                                    alignItems: 'center',
+                                }}>
+                                    <Text style={{fontSize: 48, marginBottom: 12}}>📊</Text>
+                                    <Text style={{textAlign: 'center', color: '#666', fontSize: 15}}>
+                                        {t('insights.noData')}
+                                    </Text>
+                                </View>
+                            ) : (
+                                cards.map(([cat, data]) => {
                             const rateNum = data.rateNum ?? 0;
-                            const isHighRisk = rateNum >= 0.6;
-                            const isMediumRisk = rateNum >= 0.4 && rateNum < 0.6;
-                            const isLowRisk = rateNum < 0.4;
+                            const isHighRisk = rateNum >= 60;
+                            const isMediumRisk = rateNum >= 40 && rateNum < 60;
+                            const isLowRisk = rateNum < 40;
 
                             return (
                                 <View
@@ -201,7 +269,7 @@ export default function InsightsScreen() {
                                         overflow: 'hidden',
                                     }}>
                                         <View style={{
-                                            width: `${rateNum * 100}%`,
+                                            width: `${rateNum}%`,
                                             height: '100%',
                                             backgroundColor: isHighRisk ? '#ef4444' : isMediumRisk ? '#f59e0b' : '#10b981',
                                             borderRadius: 5,
@@ -243,24 +311,28 @@ export default function InsightsScreen() {
                                     </View>
                                 </View>
                             );
-                        })
+                                })
+                            )}
+                        </>
                     )}
 
-                    {/* 습관 분석 */}
-                    <Text style={{
-                        fontSize: 18,
-                        fontWeight: '700',
-                        marginTop: 24,
-                        marginBottom: 12,
-                        color: '#111',
-                    }}>
-                        {t('insights.titleHabit')}
-                    </Text>
-
-                    {habitCorrelation && (
+                    {/* 습관 분석 - 7일 이상일 때만 표시 */}
+                    {insightAvailability?.canShowBasicInsights && (
                         <>
-                            {/* 베개커버 */}
-                            {habitCorrelation.pillowcase.count > 0 && (
+                            <Text style={{
+                                fontSize: 18,
+                                fontWeight: '700',
+                                marginTop: 24,
+                                marginBottom: 12,
+                                color: '#111',
+                            }}>
+                                {t('insights.titleHabit')}
+                            </Text>
+
+                            {habitCorrelation && (
+                                <>
+                                    {/* 베개커버 */}
+                                    {habitCorrelation.pillowcase.count > 0 && (
                                 <View style={{
                                     padding: 16,
                                     marginBottom: 12,
@@ -340,10 +412,10 @@ export default function InsightsScreen() {
                                         </Text>
                                     </View>
                                 </View>
-                            )}
+                                    )}
 
-                            {/* 스트레스 */}
-                            {habitCorrelation.stress.count > 0 && (
+                                    {/* 스트레스 */}
+                                    {habitCorrelation.stress.count > 0 && (
                                 <View style={{
                                     padding: 16,
                                     marginBottom: 12,
@@ -419,10 +491,10 @@ export default function InsightsScreen() {
                                         </Text>
                                     </View>
                                 </View>
-                            )}
+                                    )}
 
-                            {/* 수면 부족 */}
-                            {habitCorrelation.sleep && habitCorrelation.sleep.count > 0 && (
+                                    {/* 수면 부족 */}
+                                    {habitCorrelation.sleep && habitCorrelation.sleep.count > 0 && (
                                 <View style={{
                                     padding: 16,
                                     marginBottom: 12,
@@ -492,7 +564,110 @@ export default function InsightsScreen() {
                                         </Text>
                                     </View>
                                 </View>
+                                    )}
+                                </>
                             )}
+                        </>
+                    )}
+
+                    {/* 개인화된 트리거 맵 - 14일 이상일 때만 표시 */}
+                    {insightAvailability?.canShowDetailedInsights && triggers.length > 0 && (
+                        <>
+                            <Text style={{
+                                fontSize: 18,
+                                fontWeight: '700',
+                                marginTop: 24,
+                                marginBottom: 12,
+                                color: '#111',
+                            }}>
+                                🗺️ {t('insights.triggerMap')}
+                            </Text>
+                            <View style={{
+                                padding: 16,
+                                backgroundColor: '#fff',
+                                borderRadius: 12,
+                                marginBottom: 12,
+                            }}>
+                                {triggers.slice(0, 5).map((trigger) => {
+                                    const intensity = trigger.impactRate;
+                                    const color = intensity >= 40 ? '#ef4444' : intensity >= 20 ? '#f59e0b' : intensity >= 10 ? '#eab308' : '#10b981';
+                                    const size = Math.max(30, Math.min(80, intensity * 2));
+                                    
+                                    return (
+                                        <View key={trigger.category} style={{
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            marginBottom: 12,
+                                            paddingBottom: 12,
+                                            borderBottomWidth: 1,
+                                            borderBottomColor: '#e5e7eb',
+                                        }}>
+                                            <View style={{
+                                                width: size,
+                                                height: size,
+                                                borderRadius: size / 2,
+                                                backgroundColor: color,
+                                                opacity: 0.3,
+                                                marginRight: 12,
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                            }}>
+                                                <Text style={{fontSize: 12, fontWeight: '700', color}}>
+                                                    {Math.round(intensity)}%
+                                                </Text>
+                                            </View>
+                                            <View style={{flex: 1}}>
+                                                <Text style={{fontSize: 15, fontWeight: '700', color: '#111'}}>
+                                                    {t(`food.${trigger.category}`)}
+                                                </Text>
+                                                <Text style={{fontSize: 12, color: '#6b7280'}}>
+                                                    {t(trigger.recommendationKey)}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    );
+                                })}
+                            </View>
+                        </>
+                    )}
+
+                    {/* AI 기반 개인화 인사이트 - 30일 이상일 때만 표시 */}
+                    {insightAvailability?.canShowPersonalizedInsights && personalizedInsights.length > 0 && (
+                        <>
+                            <Text style={{
+                                fontSize: 18,
+                                fontWeight: '700',
+                                marginTop: 24,
+                                marginBottom: 12,
+                                color: '#111',
+                            }}>
+                                🤖 {t('insights.personalizedInsights')}
+                            </Text>
+                            {personalizedInsights.map((insight, idx) => (
+                                <View key={idx} style={{
+                                    padding: 16,
+                                    backgroundColor: '#fff',
+                                    borderRadius: 12,
+                                    marginBottom: 12,
+                                    borderLeftWidth: 4,
+                                    borderLeftColor: '#3b82f6',
+                                }}>
+                                    <Text style={{fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 8}}>
+                                        {t(insight.titleKey)}
+                                    </Text>
+                                    <Text style={{fontSize: 14, color: '#374151', lineHeight: 20}}>
+                                        {t(insight.descriptionKey, {
+                                            ...insight.descriptionParams,
+                                            ...(insight.descriptionParams?.categoryKey
+                                                ? {category: t(`food.${insight.descriptionParams.categoryKey}`)}
+                                                : {}),
+                                        })}
+                                    </Text>
+                                    <Text style={{fontSize: 11, color: '#9ca3af', marginTop: 8}}>
+                                        Confidence: {Math.round(insight.confidence)}%
+                                    </Text>
+                                </View>
+                            ))}
                         </>
                     )}
                 </ScrollView>

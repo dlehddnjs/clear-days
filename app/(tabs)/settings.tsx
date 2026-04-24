@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {Alert, Pressable, ScrollView, Text, View} from 'react-native';
 import {Picker} from '@react-native-picker/picker';
 
@@ -12,13 +12,14 @@ import {SafeAreaView} from "react-native-safe-area-context";
 export default function SettingsScreen() {
     const {locale, setLocale} = useLocale();
 
-    const [deleteCountdown, setDeleteCountdown] = useState<number | null>(null);
+    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const [notif, setNotif] = useState<any>({
         enabled: true,
         morning: true,
         evening: true,
         morningHour: 8,
         eveningHour: 21,
+        smartReminders: true,
     });
 
     useEffect(() => {
@@ -26,6 +27,9 @@ export default function SettingsScreen() {
             const loaded = await getNotificationSettings();
             setNotif(loaded);
         })();
+        return () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+        };
     }, []);
 
     const update = (key: string, value: any) => setNotif((p: any) => ({...p, [key]: value}));
@@ -95,54 +99,36 @@ export default function SettingsScreen() {
 
     const showCountdownAlert = () => {
         let countdown = 5;
-        setDeleteCountdown(countdown);
 
-        const timer = setInterval(() => {
+        timerRef.current = setInterval(() => {
             countdown--;
-            setDeleteCountdown(countdown);
-
             if (countdown === 0) {
-                clearInterval(timer);
+                if (timerRef.current) clearInterval(timerRef.current);
+                timerRef.current = null;
                 Alert.alert(
                     t('settings.deleteTitle'),
                     t('settings.deleteWarning'),
                     [
-                        {
-                            text: t('common.cancel'),
-                            style: 'cancel',
-                            onPress: () => setDeleteCountdown(null),
-                        },
-                        {
-                            text: t('settings.deleteConfirm'),
-                            onPress: executeDelete,
-                            style: 'destructive',
-                        },
+                        {text: t('common.cancel'), style: 'cancel'},
+                        {text: t('settings.deleteConfirm'), onPress: executeDelete, style: 'destructive'},
                     ]
                 );
             }
         }, 1000);
 
-        const showCountdown = () => {
-            if (countdown > 0) {
-                Alert.alert(
-                    t('settings.countdownTitle', {seconds: countdown}),
-                    t('settings.countdownMsg'),
-                    [
-                        {
-                            text: t('common.cancel'),
-                            onPress: () => {
-                                clearInterval(timer);
-                                setDeleteCountdown(null);
-                            },
-                            style: 'cancel',
-                        },
-                    ],
-                    {cancelable: false}
-                );
-            }
-        };
-
-        showCountdown();
+        Alert.alert(
+            t('settings.countdownTitle', {seconds: countdown}),
+            t('settings.countdownMsg'),
+            [{
+                text: t('common.cancel'),
+                style: 'cancel',
+                onPress: () => {
+                    if (timerRef.current) clearInterval(timerRef.current);
+                    timerRef.current = null;
+                },
+            }],
+            {cancelable: false}
+        );
     };
 
     const executeDelete = async () => {
@@ -332,6 +318,38 @@ export default function SettingsScreen() {
                                     ))}
                                 </Picker>
                             </View>
+                        </View>
+                    )}
+
+                    {notif.enabled && (
+                        <View style={{marginBottom: 14}}>
+                            <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8}}>
+                                <Text style={{fontSize: 13, color: '#6b7280', fontWeight: '600'}}>
+                                    🤖 {t('settingsScreen.smartReminders')}
+                                </Text>
+                                <Pressable
+                                    onPress={() => update('smartReminders', !notif.smartReminders)}
+                                    style={{
+                                        width: 50,
+                                        height: 28,
+                                        borderRadius: 14,
+                                        backgroundColor: notif.smartReminders ? '#111' : '#d1d5db',
+                                        justifyContent: 'center',
+                                        paddingHorizontal: 2,
+                                    }}
+                                >
+                                    <View style={{
+                                        width: 24,
+                                        height: 24,
+                                        borderRadius: 12,
+                                        backgroundColor: 'white',
+                                        transform: [{translateX: notif.smartReminders ? 22 : 0}],
+                                    }}/>
+                                </Pressable>
+                            </View>
+                            <Text style={{fontSize: 11, color: '#9ca3af', lineHeight: 16}}>
+                                {t('settingsScreen.smartRemindersDesc')}
+                            </Text>
                         </View>
                     )}
 
